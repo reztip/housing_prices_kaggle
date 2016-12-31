@@ -81,23 +81,23 @@ nas.not.meaningful = c("LotFrontage", "MasVnrType", "MasVnrArea", "Electrical")
 for( var in nas.meaningful){
   fact.levels = levels(train.df[, var])
   mode.val = "Meaningful.NA"
-  train.df[var] = factor(train.df[var], 
+  train.df[var] = factor(train.df[,var], 
                   levels = c(fact.levels, mode.val))
-  train.df[is.na(train.df[var]), var] = mode.val
+  train.df[is.na(train.df[,var]), var] = mode.val
 }
 ```
 ```{r}
 for(var in nas.not.meaningful){
   if(! is.numeric(train.df[, var])){
     fact.levels = levels(train.df[, var])
-    mode.val = sort(table(train.df[var]), decreasing = T)[[1]]
-    train.df[var] = factor(train.df[var], 
+    mode.val = sort(table(train.df[,var]), decreasing = T)[[1]]
+    train.df[,var] = factor(train.df[,var], 
                   levels = c(fact.levels, mode.val))
   }
   else { 
     mode.val = median(train.df[,var], na.rm = T)
   }
-    train.df[is.na(train.df[var]), var] = mode.val
+    train.df[is.na(train.df[,var]), var] = mode.val
 }
 ```
 
@@ -109,7 +109,20 @@ I "fix" dataset problems in the code below.
 train.df$MSSubClass = as.factor(train.df$MSSubClass)
 train.df$OverallQual = as.factor(train.df$OverallQual)
 train.df$OverallCond = as.factor(train.df$OverallCond)
+train.df$GarageYrBlt = NULL
 train.df = na.omit(train.df)
+```
+
+I also remove variables for which we only have one value of the factor.
+
+```{r}
+uniq.table = sapply(train.df, function(x) length(unique(x))) %>%
+  sort(decreasing = TRUE)
+bad.names = uniq.table[uniq.table == 1] %>% names
+# Remove bad names
+for(bn in bad.names) {
+  train.df[, bn] = NULL
+}
 ```
 
 Now we can being some analysis.
