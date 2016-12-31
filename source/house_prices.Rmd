@@ -1,0 +1,143 @@
+---
+title: "house_prices"
+author: "Alex P."
+date: "December 30, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plyr)
+library(dplyr)
+library(knitr)
+library(reshape2)
+```
+
+## The Problem
+
+A house is usually the most expensive purchase an individual makes in his or her lifetime.  This is why it's so critical that you are able to get a fair deal on a property - overpaying by $100,000 is a fatal mistake!
+
+In this analysis, I build a regression model using data on houses in Ames, Iowa.  The dataset has 79 explanatory variables usable to predict home selling prices.  Home buyers may not be building regression models to evaluate their home purchases, but appraisers, real estate firms investment firms can use these techniques to evaluate fair property values.
+
+## Basic Data Preprocessing
+
+```{r}
+setwd("/home/reztip/Desktop/kaggle/house_prices/source")
+root = ".."
+data.path  =  file.path(root, "input", "train.csv")
+train.df = read.csv(data.path, header = TRUE)
+```
+
+```{r}
+house.ids = select(train.df, Id)
+house.prices = select(train.df, SalePrice)
+# Drop the id from training
+train.df = select(train.df, -Id)
+```
+
+##Analysis of Dataset Structure
+
+How many variables do we have for training? How many houses does this dataset cover?
+```{r}
+# How many variables we have for training
+length(names(train.df)) - 1
+nrow(train.df)
+```
+  
+How many of these data are numeric? At first glance, it looks to be about half. However, this dataset doesn't look very "clean" - lots of these features are categorical which requires the generation of more binary features (one column for each value of a categorical variable). More on that later.
+
+```{r}
+colwise(is.numeric)(train.df) %>% data.frame %>% 
+  melt(id = "SalePrice") %>% select(variable, value)
+colwise(is.numeric)(train.df) %>% unlist %>% sum
+```
+
+
+How about data quality - which variables are missing the most data? 
+
+```{r}
+unlist(colwise(function(x) sum(is.na(x)))(train.df)) %>% sort(decreasing = T)
+```
+
+We are missing the most data for POOLQC, MiscFeature, Alley and Fence - more than $2/3$ of the dataset. I drop these variables.
+
+```{r}
+train.df = select(train.df, -PoolQC, -MiscFeature, -Alley, -Fence)
+```
+
+## Dealing With Missing Values
+
+I also do either median filling or mode filling for the other variables missing any data.
+
+```{r}
+nas.meaningful = c("FireplaceQu", "GarageType", "GarageYrBlt", "GarageFinish",
+                   "GarageQual", "GarageCond", "BsmtExposure", "BsmtFinType2",
+                   "BsmtQual", "BsmtCond", "BsmtFinType1")
+
+nas.not.meaningful = c("LotFrontage", "MasVnrType", "MasVnrArea", "Electrical")
+```
+
+```{r}
+for( var in nas.meaningful){
+  fact.levels = levels(train.df[, var])
+  mode.val = "Meaningful.NA"
+  train.df[var] = factor(train.df[var], 
+                  levels = c(fact.levels, mode.val))
+  train.df[is.na(train.df[var]), var] = mode.val
+}
+```
+```{r}
+for(var in nas.not.meaningful){
+  if(! is.numeric(train.df[, var])){
+    fact.levels = levels(train.df[, var])
+    mode.val = sort(table(train.df[var]), decreasing = T)[[1]]
+    train.df[var] = factor(train.df[var], 
+                  levels = c(fact.levels, mode.val))
+  }
+  else { 
+    mode.val = median(train.df[,var], na.rm = T)
+  }
+    train.df[is.na(train.df[var]), var] = mode.val
+}
+```
+
+This is all well and good, but there is a lot of information still here that requires manual scrubbing. Take, for example, the *MSSubClass* variable.  It is recorded as a numeric variable, but really represents categorical information.
+
+I "fix" dataset problems in the code below.
+
+```{r}
+train.df$MSSubClass = as.factor(train.df$MSSubClass)
+train.df$OverallQual = as.factor(train.df$OverallQual)
+train.df$OverallCond = as.factor(train.df$OverallCond)
+train.df = na.omit(train.df)
+```
+
+Now we can being some analysis.
+
+
+# Data Visualization
+
+First, how are home prices distributed?
+
+```{r}
+ggplot(train.df, 
+       aes(SalePrice, y = ..density.., fill = I("floralwhite"))) +
+  geom_histogram(bins = 30, color = 'black') + 
+  scale_x_continuous(labels = scales::dollar_format()) + 
+  labs(title = "Distribution of Home Selling Prices")
+```
+
+There is a clear trend here, the dataset looks like a log-powernormal distribution. There is a clear mode at just below $200,000, with a short left tail and a very long right tail. There is a pretty high standard deviation to the dataset - about $79,000!
+
+There appears to be a "power law" at play, indicating that the logarithm of home price will probably look more gaussian.
+
+
+
+```{r}
+ggplot(train.df, 
+       aes(SalePrice, y = ..density.., fill = I("floralwhite"))) +
+  geom_histogram(bins = 30, color = 'black') + 
+  scale_x_log10(labels = scales::dollar_format(), 
+                breaks = c(.5E5, 1E5, 2E5, 5E5)) + 
+  labs(title = "Distribution of Home Selling Prices (Log-Scaled)")
+```
