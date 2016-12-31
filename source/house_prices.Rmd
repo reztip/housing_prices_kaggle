@@ -125,6 +125,11 @@ for(bn in bad.names) {
 }
 ```
 
+I drop the YrSold variable as well, since it does not appear to be correlated to saleprice.
+```{r}
+train.df$YrSold = NULL
+```
+
 Now we can being some analysis.
 
 
@@ -144,8 +149,6 @@ There is a clear trend here, the dataset looks like a log-powernormal distributi
 
 There appears to be a "power law" at play, indicating that the logarithm of home price will probably look more gaussian.
 
-
-
 ```{r}
 ggplot(train.df, 
        aes(SalePrice, y = ..density.., fill = I("floralwhite"))) +
@@ -153,4 +156,90 @@ ggplot(train.df,
   scale_x_log10(labels = scales::dollar_format(), 
                 breaks = c(.5E5, 1E5, 2E5, 5E5)) + 
   labs(title = "Distribution of Home Selling Prices (Log-Scaled)")
+```
+
+Because the distribution of log price appears relatively gaussian, we may want to predict log-price to better fit regression model theory.
+
+Let's see the distribution of when houses were built.
+
+```{r}
+ggplot(train.df, aes(YearBuilt)) + geom_histogram(bins = 30) +
+  labs(title = "Distribution of Home Building Year")
+```
+
+There was a huge glut of  houses built in the 60s and 70s, as well as the 2000s. How does this correlate to housing prices?
+
+```{r}
+ggplot(train.df, aes(YearBuilt, SalePrice)) + geom_point() +
+  labs(title = "Scatterplot of Home Building Year vs Price" ) + 
+  scale_y_continuous( labels = scales::dollar_format())
+```
+
+There is slight upward trend in housing prices relating to the year built, with a significant group of very expensive in the latter years - post 2000.
+
+```{r}
+late.years = train.df$YearBuilt > 2000
+train.df$late.years = late.years
+```
+
+```{r}
+
+```
+
+
+```{r}
+library(glmnet)
+y = data.matrix(select(train.df, SalePrice))
+X = data.matrix(select(train.df, -SalePrice))
+mod = cv.glmnet(X,y, alpha = 1)
+```
+```{r}
+data.path  =  file.path(root, "input", "test.csv")
+test.df = read.csv(data.path, header = TRUE)
+test.df = select(test.df, -PoolQC, -MiscFeature, -Alley, -Fence)
+```
+
+```{r}
+for( var in nas.meaningful){
+  fact.levels = levels(test.df[, var])
+  mode.val = "Meaningful.NA"
+  test.df[var] = factor(test.df[,var], 
+                  levels = c(fact.levels, mode.val))
+  test.df[is.na(test.df[,var]), var] = mode.val
+}
+```
+```{r}
+for(var in nas.not.meaningful){
+  if(! is.numeric(test.df[, var])){
+    fact.levels = levels(test.df[, var])
+    mode.val = sort(table(test.df[,var]), decreasing = T)[[1]]
+    test.df[,var] = factor(test.df[,var], 
+                  levels = c(fact.levels, mode.val))
+  }
+  else { 
+    mode.val = median(test.df[,var], na.rm = T)
+  }
+    test.df[is.na(test.df[,var]), var] = mode.val
+}
+test.df$MSSubClass = as.factor(test.df$MSSubClass)
+test.df$OverallQual = as.factor(test.df$OverallQual)
+test.df$OverallCond = as.factor(test.df$OverallCond)
+test.df$GarageYrBlt = NULL
+for(bn in bad.names) {
+  test.df[, bn] = NULL
+}
+test.df$YrSold = NULL
+late.years = test.df$YearBuilt > 2000
+test.df$late.years = late.years
+```
+
+# Predictions
+```{r}
+X.test = data.matrix(select(test.df, -Id))
+preds = predict(mod, X.test)
+ids = select(test.df, Id)
+
+pred.df = cbind(ids, preds)
+names(pred.df) = c("Id", "SalePrice")
+write.csv(pred.df, file = "output.csv", row.names = FALSE)
 ```
