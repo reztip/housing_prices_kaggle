@@ -233,6 +233,21 @@ late.years = test.df$YearBuilt > 2000
 test.df$late.years = late.years
 ```
 
+
+Fill in missing data for test.df.
+
+```{r}
+mtable = colwise(function(x) sum(is.na(x)) > 0)(test.df)
+missing.vars = names(test.df)[unlist(mtable)]
+for(var in missing.vars){
+  fact.levels = levels(test.df[, var])
+  mode.val = "Meaningful.NA"
+  test.df[var] = factor(test.df[,var], 
+                  levels = c(fact.levels, mode.val))
+  test.df[is.na(test.df[,var]), var] = mode.val
+}
+```
+
 # Predictions
 ```{r}
 X.test = data.matrix(select(test.df, -Id))
