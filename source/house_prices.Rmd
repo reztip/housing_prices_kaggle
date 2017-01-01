@@ -305,3 +305,42 @@ preds = predict(mod, X.test)
 pred.df = cbind(ids, preds)
 names(pred.df) = c("Id", "SalePrice")
 write.csv(pred.df, file = "output.csv", row.names = FALSE)
+```
+
+
+
+```{r}
+calc.log.rmse = function(preds, y){
+  lp = log(preds)
+  logy = log(y)
+  return (lp - logy)^2 %>% mean
+}
+```
+
+
+```{r}
+train.df.rf = cbind(train.df.new, y)
+names(train.df.rf) = gsub("\s", "", names(train.df.rf))
+names(train.df.rf) = gsub(" ", "", names(train.df.rf))
+names(train.df.rf) = gsub("\\(", ".", names(train.df.rf))
+names(train.df.rf) = gsub("\\)", ".", names(train.df.rf))
+names(train.df.rf) = gsub("&", ".", names(train.df.rf))
+
+mod2 = randomForest(SalePrice ~ . , data = train.df.rf)
+```
+
+```{r}
+test.df.rf = test.df.new
+names(test.df.rf) = gsub("\s", "", names(test.df.rf))
+names(test.df.rf) = gsub(" ", "", names(test.df.rf))
+names(test.df.rf) = gsub("\\(", ".", names(test.df.rf))
+names(test.df.rf) = gsub("\\)", ".", names(test.df.rf))
+names(test.df.rf) = gsub("&", ".", names(test.df.rf))
+
+pred2 = predict(mod2, test.df.rf)
+```
+```{r}
+pred.df2 = cbind(ids, pred2)
+names(pred.df2) = c("Id", "SalePrice")
+write.csv(pred.df2, file = "output2.csv", row.names = FALSE)
+```
