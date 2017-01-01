@@ -7,10 +7,13 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(glmnet)
 library(plyr)
 library(dplyr)
 library(knitr)
 library(reshape2)
+library(dummies)
+library(randomForest)
 ```
 
 ## The Problem
@@ -29,10 +32,10 @@ train.df = read.csv(data.path, header = TRUE)
 ```
 
 ```{r}
-house.ids = select(train.df, Id)
-house.prices = select(train.df, SalePrice)
+house.ids = dplyr::select(train.df, Id)
+house.prices = dplyr::select(train.df, SalePrice)
 # Drop the id from training
-train.df = select(train.df, -Id)
+train.df = dplyr::select(train.df, -Id)
 ```
 
 ##Analysis of Dataset Structure
@@ -62,7 +65,7 @@ unlist(colwise(function(x) sum(is.na(x)))(train.df)) %>% sort(decreasing = T)
 We are missing the most data for POOLQC, MiscFeature, Alley and Fence - more than $2/3$ of the dataset. I drop these variables.
 
 ```{r}
-train.df = select(train.df, -PoolQC, -MiscFeature, -Alley, -Fence)
+train.df = dplyr::select(train.df, -PoolQC, -MiscFeature, -Alley, -Fence)
 ```
 
 ## Dealing With Missing Values
@@ -77,6 +80,8 @@ nas.meaningful = c("FireplaceQu", "GarageType", "GarageYrBlt", "GarageFinish",
 nas.not.meaningful = c("LotFrontage", "MasVnrType", "MasVnrArea", "Electrical")
 ```
 
+Encoding of a new variable for data where NA is actually meaningful information.
+
 ```{r}
 for( var in nas.meaningful){
   fact.levels = levels(train.df[, var])
@@ -86,6 +91,9 @@ for( var in nas.meaningful){
   train.df[is.na(train.df[,var]), var] = mode.val
 }
 ```
+
+Mode filling for categorical variables.
+
 ```{r}
 for(var in nas.not.meaningful){
   if(! is.numeric(train.df[, var])){
@@ -110,7 +118,6 @@ train.df$MSSubClass = as.factor(train.df$MSSubClass)
 train.df$OverallQual = as.factor(train.df$OverallQual)
 train.df$OverallCond = as.factor(train.df$OverallCond)
 train.df$GarageYrBlt = NULL
-train.df = na.omit(train.df)
 ```
 
 I also remove variables for which we only have one value of the factor.
@@ -131,7 +138,6 @@ train.df$YrSold = NULL
 ```
 
 Now we can being some analysis.
-
 
 # Data Visualization
 
@@ -158,7 +164,7 @@ ggplot(train.df,
   labs(title = "Distribution of Home Selling Prices (Log-Scaled)")
 ```
 
-Because the distribution of log price appears relatively gaussian, we may want to predict log-price to better fit regression model theory.
+Because the distribution of log price appears relatively gaussian, we may want to predict log-price to better fit regression model theory. More on that later (potentially).
 
 Let's see the distribution of when houses were built.
 
@@ -182,21 +188,31 @@ late.years = train.df$YearBuilt > 2000
 train.df$late.years = late.years
 ```
 
-```{r}
+Generate dummies for factor variables.
 
+```{r}
+facts = colwise(is.factor)(train.df)
+facts = names(train.df)[unlist(facts)]
+for(fact in facts){
+  nm = train.df[, fact] %>% table %>% names
+  nm = paste(fact, nm, sep="")
+  dframe = data.frame(dummy(train.df [ ,fact]))
+  names(dframe) = nm
+  train.df = cbind(train.df, dframe)
+  train.df[, fact] = NULL
+}
 ```
 
-
+# Start Predictions
 ```{r}
-library(glmnet)
 y = data.matrix(select(train.df, SalePrice))
-X = data.matrix(select(train.df, -SalePrice))
-mod = cv.glmnet(X,y, alpha = 1)
 ```
 ```{r}
 data.path  =  file.path(root, "input", "test.csv")
 test.df = read.csv(data.path, header = TRUE)
 test.df = select(test.df, -PoolQC, -MiscFeature, -Alley, -Fence)
+ids = select(test.df, Id)
+test.df = select(test.df, -Id)
 ```
 
 ```{r}
@@ -240,21 +256,52 @@ Fill in missing data for test.df.
 mtable = colwise(function(x) sum(is.na(x)) > 0)(test.df)
 missing.vars = names(test.df)[unlist(mtable)]
 for(var in missing.vars){
-  fact.levels = levels(test.df[, var])
-  mode.val = "Meaningful.NA"
-  test.df[var] = factor(test.df[,var], 
+  if(! is.numeric(test.df[, var])){
+    fact.levels = levels(test.df[, var])
+    mode.val = sort(table(test.df[,var]), decreasing = T)[[1]]
+    test.df[,var] = factor(test.df[,var], 
                   levels = c(fact.levels, mode.val))
-  test.df[is.na(test.df[,var]), var] = mode.val
+  }
+  else { 
+    mode.val = median(test.df[,var], na.rm = T)
+  }
+    test.df[is.na(test.df[,var]), var] = mode.val
+}
+```
+
+```{r}
+facts = colwise(is.factor)(test.df)
+facts = names(test.df)[unlist(facts)]
+for(fact in facts){
+  nm = test.df[, fact] %>% table 
+  nm = nm[nm > 0] %>% names
+  nm = paste(fact, nm, sep="")
+  dframe = data.frame(dummy(test.df [ ,fact]))
+  names(dframe) = nm
+  test.df = cbind(test.df, dframe)
+  test.df[, fact] = NULL
 }
 ```
 
 # Predictions
 ```{r}
-X.test = data.matrix(select(test.df, -Id))
+train.names = names(train.df)
+train.names = train.names[train.names %in% names(test.df)]
+nnx = names(test.df)
+train.names = nnx[nnx %in% train.names]
+
+train.df.new = train.df[, train.names]
+test.df.new = test.df[, train.names]
+
+X.test = data.matrix(test.df.new)
+```
+
+```{r}
+X = data.matrix(train.df.new)
+mod = cv.glmnet(X,y, alpha = 1)
+
 preds = predict(mod, X.test)
-ids = select(test.df, Id)
 
 pred.df = cbind(ids, preds)
 names(pred.df) = c("Id", "SalePrice")
 write.csv(pred.df, file = "output.csv", row.names = FALSE)
-```
